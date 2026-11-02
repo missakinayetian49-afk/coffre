@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Coffre">
+<meta name="theme-color" content="#111214">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Coffre</title>
+<style>
+:root{--bg:#111214;--card:#1c1e22;--fg:#f2f3f5;--mut:#8b8f98;--acc:#4c9aff;--red:#ff5d5d}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:16px -apple-system,system-ui,sans-serif;-webkit-user-select:none;user-select:none;overscroll-behavior:none}
+body.cover #app,body.cover #viewer,body.cover #sheet{visibility:hidden}
+[hidden]{display:none!important}
+button{font:inherit;color:var(--fg);background:var(--card);border:0;border-radius:10px;padding:9px 14px}
+button.p{background:var(--acc);color:#fff}
+button.d{color:var(--red)}
+button.l{background:none;padding:6px 8px;color:var(--acc)}
+input[type=password],input[type=text]{font:inherit;width:100%;padding:13px;border-radius:10px;border:1px solid #33363c;background:var(--card);color:var(--fg);-webkit-user-select:text;user-select:text}
+#lock{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:32px;max-width:420px;margin:auto}
+#lock h1{margin:0 0 4px;font-size:28px}
+#lock p{margin:0;color:var(--mut);font-size:14px}
+#msg{color:var(--red);min-height:20px}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:6px;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;background:rgba(17,18,20,.92);backdrop-filter:blur(12px)}
+header h2{flex:1;margin:0;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#app{padding-bottom:calc(env(safe-area-inset-bottom) + 90px);min-height:100%}
+.albums{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:12px}
+.card{border-radius:12px}
+.cover{aspect-ratio:1;background:var(--card);border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:34px}
+.cover img{width:100%;height:100%;object-fit:cover}
+.card b{display:block;margin-top:6px;font-weight:600;font-size:15px}
+.card span{color:var(--mut);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
+.cell{position:relative;aspect-ratio:1;background:var(--card);overflow:hidden}
+.cell img{width:100%;height:100%;object-fit:cover;display:block}
+.cell.s::after{content:"✓";position:absolute;inset:0;background:rgba(76,154,255,.45);display:flex;align-items:flex-end;justify-content:flex-end;padding:6px;font-size:22px;font-weight:700}
+.empty{color:var(--mut);text-align:center;padding:60px 30px;line-height:1.5}
+#bar{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;justify-content:center;gap:10px;padding:10px 12px calc(env(safe-area-inset-bottom) + 10px);background:linear-gradient(transparent,var(--bg) 40%)}
+#bar button{box-shadow:0 2px 10px rgba(0,0,0,.4)}
+#viewer{position:fixed;inset:0;z-index:20;background:#000;display:flex;flex-direction:column}
+#vtop,#vbot{display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top) + 6px) 12px 6px}
+#vbot{padding:6px 12px calc(env(safe-area-inset-bottom) + 10px)}
+#vwrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:pan-y}
+#vimg{max-width:100%;max-height:100%;object-fit:contain}
+#sheetbg{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
+#sheet{width:100%;max-height:75%;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px)}
+#sheet h3{margin:0 0 10px}
+.row{display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid #2a2d33}
+.row .ck{width:26px;height:26px;border-radius:50%;border:2px solid #555;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700}
+.row .ck.on{background:var(--acc);border-color:var(--acc)}
+.row .ck.mid{border-color:var(--acc);color:var(--acc)}
+.row .n{flex:1}
+#toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 60px);transform:translateX(-50%);background:#2b2e34;padding:10px 16px;border-radius:20px;z-index:60;font-size:14px}
+</style>
+</head>
+<body>
+<div id="lock" hidden>
+  <h1>🔒 Coffre</h1>
+  <p id="lockinfo"></p>
+  <input type="password" id="pin" placeholder="Code" autocomplete="off">
+  <input type="password" id="pin2" placeholder="Confirmer le code" autocomplete="off" hidden>
+  <div id="msg"></div>
+  <button class="p" id="go">Déverrouiller</button>
+  <button class="l" id="restore" hidden>Restaurer une sauvegarde</button>
+  <input type="file" id="restoref" accept=".vault,application/json" hidden>
+</div>
+
+<div id="app"></div>
+<div id="bar" hidden></div>
+<input type="file" id="picker" accept="image/*" multiple hidden>
+
+<div id="viewer" hidden>
+  <div id="vtop"><button class="l" id="vclose">Fermer</button><span id="vcount" style="color:var(--mut)"></span><button class="l" id="valb">Albums</button></div>
+  <div id="vwrap"><img id="vimg" alt=""></div>
+  <div id="vbot"><button class="d" id="vdel">Supprimer</button><span></span></div>
+</div>
+<div id="sheetbg" hidden><div id="sheet"></div></div>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const E=new TextEncoder(), D=new TextDecoder();
+let KEY=null, META={albums:[]}, IDS=[], view={t:'home'}, sel=null, V=null, hiddenAt=0;
+const thumbURL=new Map();
+
+/* ---------- IndexedDB ---------- */
+const dbp=new Promise((res,rej)=>{
+  const r=indexedDB.open('coffre',1);
+  r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('photos',{keyPath:'id'});d.createObjectStore('thumbs',{keyPath:'id'});d.createObjectStore('kv');};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
+});
+function tx(st,mode,fn){return dbp.then(db=>new Promise((res,rej)=>{
+  const t=db.transaction(st,mode),s=t.objectStore(st),r=fn(s);
+  t.oncomplete=()=>res(r&&r.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error);
+}));}
+const kvGet=k=>tx('kv','readonly',s=>s.get(k));
+const kvSet=(k,v)=>tx('kv','readwrite',s=>s.put(v,k));
+const get=(st,id)=>tx(st,'readonly',s=>s.get(id));
+const put=(st,o)=>tx(st,'readwrite',s=>s.put(o));
+const del=(st,id)=>tx(st,'readwrite',s=>s.delete(id));
+const keys=st=>tx(st,'readonly',s=>s.getAllKeys());
+
+/* ---------- Crypto ---------- */
+async function deriveKey(pin,salt){
+  const km=await crypto.subtle.importKey('raw',E.encode(pin),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:300000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function encBuf(buf){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},KEY,buf));
+  const out=new Uint8Array(12+ct.length);out.set(iv);out.set(ct,12);return out.buffer;
+}
+async function decBuf(b,k=KEY){
+  const u=new Uint8Array(b);
+  return crypto.subtle.decrypt({name:'AES-GCM',iv:u.slice(0,12)},k,u.slice(12));
+}
+const saveMeta=async()=>kvSet('meta',await encBuf(E.encode(JSON.stringify(META))));
+
+/* ---------- Utils ---------- */
+function toast(t,ms=2200){let e=$('#toast');if(!e){e=document.createElement('div');e.id='toast';document.body.append(e);}e.textContent=t;e.hidden=false;clearTimeout(toast.t);if(ms)toast.t=setTimeout(()=>e.hidden=true,ms);}
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const newId=()=>Date.now().toString(36).padStart(9,'0')+Math.random().toString(36).slice(2,7);
+const album=id=>META.albums.find(a=>a.id===id);
+function curIds(){
+  if(view.t==='all')return IDS;
+  const a=album(view.id);if(!a)return [];
+  const s=new Set(a.ids);return IDS.filter(i=>s.has(i));
+}
+const io=new IntersectionObserver(es=>{for(const e of es)if(e.isIntersecting){io.unobserve(e.target);loadThumb(e.target.dataset.id,e.target);}},{rootMargin:'300px'});
+async function loadThumb(id,img){
+  try{
+    if(!thumbURL.has(id)){
+      const r=await get('thumbs',id);if(!r)return;
+      const b=await decBuf(r.d);thumbURL.set(id,URL.createObjectURL(new Blob([b],{type:'image/jpeg'})));
+    }
+    img.src=thumbURL.get(id);
+  }catch(e){}
+}
+function thumbImg(id){const i=document.createElement('img');i.dataset.id=id;i.alt='';io.observe(i);return i;}
+
+/* ---------- Lock / setup ---------- */
+let setupMode=false;
+async function boot(){
+  const salt=await kvGet('salt');
+  setupMode=!salt;
+  $('#lock').hidden=false;
+  $('#pin2').hidden=!setupMode;
+  $('#restore').hidden=!setupMode;
+  $('#go').textContent=setupMode?'Créer le coffre':'Déverrouiller';
+  $('#lockinfo').textContent=setupMode?'Choisis un code d’au moins 6 caractères. Il chiffre tes photos : s’il est perdu, elles sont irrécupérables.':'';
+  $('#pin').value='';$('#pin2').value='';$('#msg').textContent='';
+}
+const msg=t=>$('#msg').textContent=t;
+$('#go').onclick=async()=>{
+  const pin=$('#pin').value;msg('');
+  const btn=$('#go');btn.disabled=true;
+  try{
+    if(setupMode){
+      if(pin.length<6)return msg('6 caractères minimum.');
+      if(pin!==$('#pin2').value)return msg('Les codes ne correspondent pas.');
+      const salt=crypto.getRandomValues(new Uint8Array(16));
+      KEY=await deriveKey(pin,salt);
+      await kvSet('salt',salt);await kvSet('check',await encBuf(E.encode('ok')));
+      META={albums:[]};await saveMeta();
+    }else{
+      const salt=await kvGet('salt');const k=await deriveKey(pin,salt);
+      try{await decBuf(await kvGet('check'),k);}catch(e){await new Promise(r=>setTimeout(r,1000));return msg('Code incorrect.');}
+      KEY=k;
+    }
+    await loadAll();
+    $('#lock').hidden=true;view={t:'home'};sel=null;render();
+    if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
+  }finally{btn.disabled=false;}
+};
+$('#pin').addEventListener('keydown',e=>{if(e.key==='Enter'&&!setupMode)$('#go').click();});
+async function loadAll(){
+  IDS=(await keys('thumbs')).sort().reverse();
+  const m=await kvGet('meta');
+  META=m?JSON.parse(D.decode(await decBuf(m))):{albums:[]};
+}
+function lock(){
+  KEY=null;META={albums:[]};IDS=[];sel=null;V=null;
+  for(const u of thumbURL.values())URL.revokeObjectURL(u);thumbURL.clear();
+  $('#app').innerHTML='';$('#bar').hidden=true;$('#viewer').hidden=true;$('#vimg').removeAttribute('src');$('#sheetbg').hidden=true;
+  boot();
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){hiddenAt=Date.now();document.body.classList.add('cover');}
+  else{document.body.classList.remove('cover');if(KEY&&Date.now()-hiddenAt>30000)lock();}
+});
+
+/* ---------- Render ---------- */
+function render(){
+  const app=$('#app');app.innerHTML='';
+  if(view.t==='home')renderHome(app);else renderGrid(app);
+  renderBar();
+}
+function header(title,left,right){
+  const h=document.createElement('header');
+  if(left)h.append(left);
+  const t=document.createElement('h2');t.textContent=title;h.append(t);
+  for(const b of right)h.append(b);
+  return h;
+}
+function btn(label,fn,cls='l'){const b=document.createElement('button');b.className=cls;b.textContent=label;b.onclick=fn;return b;}
+
+function renderHome(app){
+  app.append(header('Coffre',null,[btn('Sauvegarde',backupMenu),btn('Verrouiller',lock)]));
+  const g=document.createElement('div');g.className='albums';
+  g.append(card('Toutes les photos',IDS.length,IDS[0],()=>{view={t:'all'};sel=null;render();}));
+  for(const a of META.albums){
+    const ids=IDS.filter(i=>a.ids.includes(i));
+    g.append(card(a.name,ids.length,ids[0],()=>{view={t:'album',id:a.id};sel=null;render();}));
+  }
+  const n=document.createElement('div');n.className='card';n.onclick=newAlbumPrompt;
+  n.innerHTML='<div class="cover">＋</div><b>Nouvel album</b>';
+  g.append(n);
+  app.append(g);
+}
+function card(name,count,coverId,fn){
+  const c=document.createElement('div');c.className='card';c.onclick=fn;
+  const cv=document.createElement('div');cv.className='cover';
+  if(coverId)cv.append(thumbImg(coverId));else cv.textContent='🖼';
+  const b=document.createElement('b');b.textContent=name;
+  const s=document.createElement('span');s.textContent=count+' photo'+(count>1?'s':'');
+  c.append(cv,b,s);return c;
+}
+function renderGrid(app){
+  const ids=curIds();
+  const a=view.t==='album'?album(view.id):null;
+  if(view.t==='album'&&!a){view={t:'home'};return render();}
+  const title=sel?(sel.size+' sélectionnée'+(sel.size>1?'s':'')):(a?a.name:'Toutes les photos');
+  const right=[];
+  if(sel)right.push(btn('Annuler',()=>{sel=null;render();}));
+  else{
+    if(ids.length)right.push(btn('Sélectionner',()=>{sel=new Set();render();}));
+    if(a)right.push(btn('⋯',albumMenu));
+  }
+  app.append(header(title,sel?null:btn('‹ Albums',()=>{view={t:'home'};render();}),right));
+  if(!ids.length){
+    const e=document.createElement('div');e.className='empty';
+    e.textContent=a?'Album vide. Ajoute des photos avec le bouton ci-dessous, ou depuis « Toutes les photos » via Sélectionner → Albums.':'Aucune photo. Appuie sur « Importer ».';
+    app.append(e);return;
+  }
+  const g=document.createElement('div');g.className='grid';
+  ids.forEach((id,i)=>{
+    const c=document.createElement('div');c.className='cell'+(sel&&sel.has(id)?' s':'');
+    c.append(thumbImg(id));
+    c.onclick=()=>{
+      if(sel){sel.has(id)?sel.delete(id):sel.add(id);render();}
+      else openViewer(ids,i);
+    };
+    g.append(c);
+  });
+  app.append(g);
+}
+function renderBar(){
+  const b=$('#bar');b.innerHTML='';
+  if(view.t==='home'){b.hidden=true;return;}
+  b.hidden=false;
+  if(sel){
+    const n=sel.size;
+    b.append(btn('Albums',()=>n&&openSheet([...sel]),'p'));
+    if(view.t==='album')b.append(btn('Retirer',()=>n&&removeFromAlbum([...sel]),''));
+    b.append(btn('Supprimer',()=>n&&deletePhotos([...sel]),'d'));
+  }else b.append(btn('＋ Importer',()=>$('#picker').click(),'p'));
+}
+
+/* ---------- Albums ---------- */
+async function newAlbumPrompt(){
+  const name=(prompt('Nom du nouvel album :')||'').trim();
+  if(!name)return;
+  META.albums.push({id:newId(),name,ids:[]});await saveMeta();render();
+}
+function albumMenu(){
+  const a=album(view.id);
+  const act=prompt('Album « '+a.name+' »\nTape 1 pour renommer, 2 pour supprimer l’album (les photos restent dans le coffre).');
+  if(act==='1'){
+    const n=(prompt('Nouveau nom :',a.name)||'').trim();
+    if(n){a.name=n;saveMeta().then(render);}
+  }else if(act==='2'){
+    if(confirm('Supprimer l’album « '+a.name+' » ? Les photos restent dans « Toutes les photos ».')){
+      META.albums=META.albums.filter(x=>x!==a);view={t:'home'};saveMeta().then(render);
+    }
+  }
+}
+async function removeFromAlbum(pids){
+  const a=album(view.id);a.ids=a.ids.filter(i=>!pids.includes(i));
+  sel=null;await saveMeta();render();toast('Retirées de l’album');
+}
+function openSheet(pids){
+  const bg=$('#sheetbg'),sh=$('#sheet');
+  const draw=()=>{
+    sh.innerHTML='';
+    const h=document.createElement('h3');h.textContent='Ajouter à des albums';sh.append(h);
+    for(const a of META.albums){
+      const n=pids.filter(p=>a.ids.includes(p)).length;
+      const st=n===pids.length?'on':n>0?'mid':'';
+      const r=document.createElement('div');r.className='row';
+      r.innerHTML='<div class="ck '+st+'">'+(st==='on'?'✓':st==='mid'?'–':'')+'</div><div class="n">'+esc(a.name)+'</div>';
+      r.onclick=async()=>{
+        if(st==='on')a.ids=a.ids.filter(i=>!pids.includes(i));
+        else for(const p of pids)if(!a.ids.includes(p))a.ids.push(p);
+        await saveMeta();draw();
+      };
+      sh.append(r);
+    }
+    const row=document.createElement('div');row.style.cssText='display:flex;gap:8px;margin-top:14px';
+    const inp=document.createElement('input');inp.type='text';inp.placeholder='Nouvel album…';
+    const add=btn('Créer',async()=>{
+      const name=inp.value.trim();if(!name)return;
+      META.albums.push({id:newId(),name,ids:[...pids]});await saveMeta();draw();
+    },'p');
+    row.append(inp,add);sh.append(row);
+    const ok=btn('Terminé',()=>{bg.hidden=true;if(sel)sel=null;render();},'p');
+    ok.style.cssText='width:100%;margin-top:14px';sh.append(ok);
+  };
+  draw();bg.hidden=false;
+}
+$('#sheetbg').addEventListener('click',e=>{if(e.target.id==='sheetbg'){$('#sheetbg').hidden=true;if(sel)sel=null;if(KEY)render();}});
+
+/* ---------- Photos ---------- */
+async function makeThumb(file){
+  let bmp;
+  try{bmp=await createImageBitmap(file,{imageOrientation:'from-image'});}
+  catch(e){
+    const u=URL.createObjectURL(file);
+    bmp=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=u;});
+  }
+  const w=bmp.width||bmp.naturalWidth,h=bmp.height||bmp.naturalHeight,s=Math.min(1,400/Math.max(w,h));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w*s));c.height=Math.max(1,Math.round(h*s));
+  c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+  if(bmp.close)bmp.close();
+  const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8));
+  return blob.arrayBuffer();
+}
+$('#picker').onchange=async e=>{
+  const files=[...e.target.files];e.target.value='';
+  if(!files.length||!KEY)return;
+  const albumId=view.t==='album'?view.id:null;
+  let ok=0;
+  for(let i=0;i<files.length;i++){
+    toast('Import '+(i+1)+' / '+files.length+'…',0);
+    try{
+      const f=files[i],id=newId();
+      const t=await makeThumb(f);
+      await put('thumbs',{id,d:await encBuf(t)});
+      await put('photos',{id,type:f.type||'image/jpeg',d:await encBuf(await f.arrayBuffer())});
+      IDS.unshift(id);if(albumId)album(albumId).ids.push(id);ok++;
+    }catch(err){console.error(err);}
+  }
+  await saveMeta();render();
+  toast(ok+' photo'+(ok>1?'s':'')+' importée'+(ok>1?'s':'')+'. Pense à supprimer les originaux de Photos.',4500);
+};
+async function deletePhotos(pids,silent){
+  if(!silent&&!confirm('Supprimer définitivement '+pids.length+' photo'+(pids.length>1?'s':'')+' du coffre ?'))return false;
+  for(const id of pids){
+    await del('photos',id);await del('thumbs',id);
+    if(thumbURL.has(id)){URL.revokeObjectURL(thumbURL.get(id));thumbURL.delete(id);}
+  }
+  IDS=IDS.filter(i=>!pids.includes(i));
+  for(const a of META.albums)a.ids=a.ids.filter(i=>!pids.includes(i));
+  sel=null;await saveMeta();render();return true;
+}
+
+/* ---------- Viewer ---------- */
+async function openViewer(ids,i){V={ids,i,url:null};$('#viewer').hidden=false;await showV();}
+async function showV(){
+  const id=V.ids[V.i];
+  const rec=await get('photos',id);if(!rec)return;
+  const buf=await decBuf(rec.d);
+  if(V.url)URL.revokeObjectURL(V.url);
+  V.url=URL.createObjectURL(new Blob([buf],{type:rec.type}));
+  $('#vimg').src=V.url;$('#vcount').textContent=(V.i+1)+' / '+V.ids.length;
+}
+function closeViewer(){
+  $('#viewer').hidden=true;$('#vimg').removeAttribute('src');
+  if(V&&V.url)URL.revokeObjectURL(V.url);V=null;
+}
+$('#vclose').onclick=closeViewer;
+$('#valb').onclick=()=>V&&openSheet([V.ids[V.i]]);
+$('#vdel').onclick=async()=>{
+  if(!V)return;const id=V.ids[V.i];
+  if(!await deletePhotos([id]))return;
+  V.ids.splice(V.i,1);
+  if(!V.ids.length)return closeViewer();
+  if(V.i>=V.ids.length)V.i=V.ids.length-1;
+  showV();
+};
+let tx0=null;
+$('#vwrap').addEventListener('touchstart',e=>{tx0=e.touches[0].clientX;},{passive:true});
+$('#vwrap').addEventListener('touchend',e=>{
+  if(tx0===null||!V)return;
+  const dx=e.changedTouches[0].clientX-tx0;tx0=null;
+  if(Math.abs(dx)<50)return;
+  if(dx<0&&V.i<V.ids.length-1){V.i++;showV();}
+  else if(dx>0&&V.i>0){V.i--;showV();}
+});
+
+/* ---------- Backup ---------- */
+const b64=buf=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result.split(',')[1]);f.readAsDataURL(new Blob([buf]));});
+const unb64=async s=>(await (await fetch('data:application/octet-stream;base64,'+s)).arrayBuffer());
+function backupMenu(){
+  const a=prompt('Sauvegarde\nTape 1 pour exporter une sauvegarde chiffrée (.vault).\nPour restaurer, efface d’abord les données du site puis utilise « Restaurer » à l’écran de création.');
+  if(a==='1')exportBackup();
+}
+async function exportBackup(){
+  toast('Préparation de la sauvegarde…',0);
+  try{
+    const out={v:1,salt:Array.from(await kvGet('salt')),check:await b64(await kvGet('check')),meta:await b64(await kvGet('meta')),photos:[]};
+    for(const id of IDS){
+      const p=await get('photos',id),t=await get('thumbs',id);
+      out.photos.push({id,type:p.type,d:await b64(p.d),t:await b64(t.d)});
+    }
+    const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
+    const file=new File([blob],'coffre-'+new Date().toISOString().slice(0,10)+'.vault',{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[file]}))await navigator.share({files:[file]});
+    else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=file.name;a.click();}
+    toast('Sauvegarde prête');
+  }catch(e){if(e.name!=='AbortError')toast('Échec de la sauvegarde');else toast('Annulé');}
+}
+$('#restore').onclick=()=>$('#restoref').click();
+$('#restoref').onchange=async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  try{
+    toast('Restauration…',0);
+    const o=JSON.parse(await f.text());
+    await kvSet('salt',new Uint8Array(o.salt));
+    await kvSet('check',await unb64(o.check));
+    await kvSet('meta',await unb64(o.meta));
+    for(const p of o.photos){
+      await put('photos',{id:p.id,type:p.type,d:await unb64(p.d)});
+      await put('thumbs',{id:p.id,d:await unb64(p.t)});
+    }
+    toast('Sauvegarde restaurée. Entre ton code d’origine.',4000);
+    boot();
+  }catch(err){console.error(err);toast('Fichier invalide');}
+};
+
+/* ---------- Init ---------- */
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+boot();
+</script>
+</body>
+</html>
