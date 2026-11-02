@@ -46,7 +46,8 @@ header h2{flex:1;margin:0;font-size:19px;white-space:nowrap;overflow:hidden;text
 #vtop,#vbot{display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top) + 6px) 12px 6px}
 #vbot{padding:6px 12px calc(env(safe-area-inset-bottom) + 10px)}
 #vwrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:pan-y}
-#vimg{max-width:100%;max-height:100%;object-fit:contain}
+#vimg,#vvid{max-width:100%;max-height:100%;object-fit:contain}
+.vb{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 7px;font-size:12px}
 #sheetbg{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
 #sheet{width:100%;max-height:75%;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px)}
 #sheet h3{margin:0 0 10px}
@@ -72,12 +73,12 @@ header h2{flex:1;margin:0;font-size:19px;white-space:nowrap;overflow:hidden;text
 
 <div id="app"></div>
 <div id="bar" hidden></div>
-<input type="file" id="picker" accept="image/*" multiple hidden>
+<input type="file" id="picker" accept="image/*,video/*" multiple hidden>
 
 <div id="viewer" hidden>
   <div id="vtop"><button class="l" id="vclose">Fermer</button><span id="vcount" style="color:var(--mut)"></span><button class="l" id="valb">Albums</button></div>
-  <div id="vwrap"><img id="vimg" alt=""></div>
-  <div id="vbot"><button class="d" id="vdel">Supprimer</button><span></span></div>
+  <div id="vwrap"><img id="vimg" alt=""><video id="vvid" controls playsinline loop hidden></video></div>
+  <div id="vbot"><button class="d" id="vdel">Supprimer</button><span><button class="l" id="vprev" style="font-size:26px;padding:0 14px">‹</button><button class="l" id="vnext" style="font-size:26px;padding:0 14px">›</button></span></div>
 </div>
 <div id="sheetbg" hidden><div id="sheet"></div></div>
 
@@ -126,6 +127,7 @@ function toast(t,ms=2200){let e=$('#toast');if(!e){e=document.createElement('div
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const newId=()=>Date.now().toString(36).padStart(9,'0')+Math.random().toString(36).slice(2,7);
 const album=id=>META.albums.find(a=>a.id===id);
+const isVid=id=>(META.vids||[]).includes(id);
 function curIds(){
   if(view.t==='all')return IDS;
   const a=album(view.id);if(!a)return [];
@@ -166,7 +168,7 @@ $('#go').onclick=async()=>{
       const salt=crypto.getRandomValues(new Uint8Array(16));
       KEY=await deriveKey(pin,salt);
       await kvSet('salt',salt);await kvSet('check',await encBuf(E.encode('ok')));
-      META={albums:[]};await saveMeta();
+      META={albums:[],vids:[]};await saveMeta();
     }else{
       const salt=await kvGet('salt');const k=await deriveKey(pin,salt);
       try{await decBuf(await kvGet('check'),k);}catch(e){await new Promise(r=>setTimeout(r,1000));return msg('Code incorrect.');}
@@ -182,15 +184,17 @@ async function loadAll(){
   IDS=(await keys('thumbs')).sort().reverse();
   const m=await kvGet('meta');
   META=m?JSON.parse(D.decode(await decBuf(m))):{albums:[]};
+  if(!META.vids)META.vids=[];
 }
 function lock(){
-  KEY=null;META={albums:[]};IDS=[];sel=null;V=null;
+  if(V)closeViewer();
+  KEY=null;META={albums:[],vids:[]};IDS=[];sel=null;
   for(const u of thumbURL.values())URL.revokeObjectURL(u);thumbURL.clear();
   $('#app').innerHTML='';$('#bar').hidden=true;$('#viewer').hidden=true;$('#vimg').removeAttribute('src');$('#sheetbg').hidden=true;
   boot();
 }
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){hiddenAt=Date.now();document.body.classList.add('cover');}
+  if(document.hidden){hiddenAt=Date.now();document.body.classList.add('cover');$('#vvid').pause();}
   else{document.body.classList.remove('cover');if(KEY&&Date.now()-hiddenAt>30000)lock();}
 });
 
@@ -251,6 +255,7 @@ function renderGrid(app){
   ids.forEach((id,i)=>{
     const c=document.createElement('div');c.className='cell'+(sel&&sel.has(id)?' s':'');
     c.append(thumbImg(id));
+    if(isVid(id)){const b=document.createElement('div');b.className='vb';b.textContent='▶';c.append(b);}
     c.onclick=()=>{
       if(sel){sel.has(id)?sel.delete(id):sel.add(id);render();}
       else openViewer(ids,i);
@@ -339,23 +344,58 @@ async function makeThumb(file){
   const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8));
   return blob.arrayBuffer();
 }
+async function videoThumb(file){
+  const u=URL.createObjectURL(file);
+  try{
+    const v=document.createElement('video');
+    v.muted=true;v.playsInline=true;v.preload='auto';v.src=u;
+    await new Promise((res,rej)=>{v.onloadeddata=res;v.onerror=()=>rej(new Error('video'));setTimeout(()=>rej(new Error('timeout')),8000);});
+    await new Promise(res=>{v.onseeked=res;setTimeout(res,3000);v.currentTime=Math.min(0.5,(v.duration||1)/2);});
+    const w=v.videoWidth,h=v.videoHeight;
+    if(!w||!h)throw new Error('size');
+    const s=Math.min(1,400/Math.max(w,h));
+    const c=document.createElement('canvas');c.width=Math.round(w*s);c.height=Math.round(h*s);
+    c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8));
+    return blob.arrayBuffer();
+  }catch(e){
+    const c=document.createElement('canvas');c.width=c.height=200;
+    const x=c.getContext('2d');x.fillStyle='#1c1e22';x.fillRect(0,0,200,200);
+    x.fillStyle='#8b8f98';x.font='80px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText('▶',100,100);
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8));
+    return blob.arrayBuffer();
+  }finally{URL.revokeObjectURL(u);}
+}
+const MAXSIZE=200*1024*1024;
 $('#picker').onchange=async e=>{
   const files=[...e.target.files];e.target.value='';
   if(!files.length||!KEY)return;
   const albumId=view.t==='album'?view.id:null;
-  let ok=0;
+  let ok=0,big=0,fail=0;
   for(let i=0;i<files.length;i++){
     toast('Import '+(i+1)+' / '+files.length+'…',0);
+    const f=files[i];
+    if(f.size>MAXSIZE){big++;continue;}
+    let id=null;
     try{
-      const f=files[i],id=newId();
-      const t=await makeThumb(f);
+      id=newId();
+      const isV=(f.type||'').startsWith('video/')||/\.(mov|mp4|m4v)$/i.test(f.name||'');
+      const t=isV?await videoThumb(f):await makeThumb(f);
       await put('thumbs',{id,d:await encBuf(t)});
-      await put('photos',{id,type:f.type||'image/jpeg',d:await encBuf(await f.arrayBuffer())});
+      await put('photos',{id,type:f.type||(isV?'video/mp4':'image/jpeg'),d:await encBuf(await f.arrayBuffer())});
+      if(isV){if(!META.vids)META.vids=[];META.vids.push(id);}
       IDS.unshift(id);if(albumId)album(albumId).ids.push(id);ok++;
-    }catch(err){console.error(err);}
+    }catch(err){
+      console.error(err);fail++;
+      if(id){await del('photos',id).catch(()=>{});await del('thumbs',id).catch(()=>{});}
+    }
   }
   await saveMeta();render();
-  toast(ok+' photo'+(ok>1?'s':'')+' importée'+(ok>1?'s':'')+'. Pense à supprimer les originaux de Photos.',4500);
+  let m=ok+' fichier'+(ok>1?'s':'')+' importé'+(ok>1?'s':'')+'.';
+  if(big)m+=' '+big+' trop volumineux (> 200 Mo), ignoré'+(big>1?'s':'')+'.';
+  if(fail)m+=' '+fail+' en échec.';
+  if(ok)m+=' Pense à supprimer les originaux de Photos.';
+  toast(m,6000);
 };
 async function deletePhotos(pids,silent){
   if(!silent&&!confirm('Supprimer définitivement '+pids.length+' photo'+(pids.length>1?'s':'')+' du coffre ?'))return false;
@@ -365,6 +405,7 @@ async function deletePhotos(pids,silent){
   }
   IDS=IDS.filter(i=>!pids.includes(i));
   for(const a of META.albums)a.ids=a.ids.filter(i=>!pids.includes(i));
+  META.vids=(META.vids||[]).filter(i=>!pids.includes(i));
   sel=null;await saveMeta();render();return true;
 }
 
@@ -372,13 +413,22 @@ async function deletePhotos(pids,silent){
 async function openViewer(ids,i){V={ids,i,url:null};$('#viewer').hidden=false;await showV();}
 async function showV(){
   const id=V.ids[V.i];
-  const rec=await get('photos',id);if(!rec)return;
+  const vid=$('#vvid'),img=$('#vimg');
+  vid.pause();
+  const rec=await get('photos',id);
+  if(!rec||!V||V.ids[V.i]!==id)return;
   const buf=await decBuf(rec.d);
+  if(!V||V.ids[V.i]!==id)return;
   if(V.url)URL.revokeObjectURL(V.url);
   V.url=URL.createObjectURL(new Blob([buf],{type:rec.type}));
-  $('#vimg').src=V.url;$('#vcount').textContent=(V.i+1)+' / '+V.ids.length;
+  const isV=(rec.type||'').startsWith('video/');
+  vid.hidden=!isV;img.hidden=isV;
+  if(isV){img.removeAttribute('src');vid.src=V.url;vid.loop=true;vid.load();vid.play().catch(()=>{});}
+  else{vid.removeAttribute('src');vid.load();img.src=V.url;}
+  $('#vcount').textContent=(V.i+1)+' / '+V.ids.length;
 }
 function closeViewer(){
+  const vv=$('#vvid');vv.pause();vv.removeAttribute('src');vv.load();
   $('#viewer').hidden=true;$('#vimg').removeAttribute('src');
   if(V&&V.url)URL.revokeObjectURL(V.url);V=null;
 }
@@ -393,7 +443,9 @@ $('#vdel').onclick=async()=>{
   showV();
 };
 let tx0=null;
-$('#vwrap').addEventListener('touchstart',e=>{tx0=e.touches[0].clientX;},{passive:true});
+$('#vprev').onclick=()=>{if(V&&V.i>0){V.i--;showV();}};
+$('#vnext').onclick=()=>{if(V&&V.i<V.ids.length-1){V.i++;showV();}};
+$('#vwrap').addEventListener('touchstart',e=>{tx0=e.target.id==='vvid'?null:e.touches[0].clientX;},{passive:true});
 $('#vwrap').addEventListener('touchend',e=>{
   if(tx0===null||!V)return;
   const dx=e.changedTouches[0].clientX-tx0;tx0=null;
@@ -412,13 +464,17 @@ function backupMenu(){
 async function exportBackup(){
   toast('Préparation de la sauvegarde…',0);
   try{
-    const out={v:1,salt:Array.from(await kvGet('salt')),check:await b64(await kvGet('check')),meta:await b64(await kvGet('meta')),photos:[]};
+    const items=[];let body=new Blob([]);
     for(const id of IDS){
       const p=await get('photos',id),t=await get('thumbs',id);
-      out.photos.push({id,type:p.type,d:await b64(p.d),t:await b64(t.d)});
+      if(!p||!t)continue;
+      items.push({id,type:p.type,pl:p.d.byteLength,tl:t.d.byteLength});
+      body=new Blob([body,p.d,t.d]);
     }
-    const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
-    const file=new File([blob],'coffre-'+new Date().toISOString().slice(0,10)+'.vault',{type:'application/json'});
+    const hdr=E.encode(JSON.stringify({v:2,salt:Array.from(await kvGet('salt')),check:await b64(await kvGet('check')),meta:await b64(await kvGet('meta')),items}));
+    const len=new Uint8Array(4);new DataView(len.buffer).setUint32(0,hdr.length);
+    const blob=new Blob([E.encode('CFR2'),len,hdr,body],{type:'application/octet-stream'});
+    const file=new File([blob],'coffre-'+new Date().toISOString().slice(0,10)+'.vault',{type:'application/octet-stream'});
     if(navigator.canShare&&navigator.canShare({files:[file]}))await navigator.share({files:[file]});
     else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=file.name;a.click();}
     toast('Sauvegarde prête');
@@ -429,13 +485,28 @@ $('#restoref').onchange=async e=>{
   const f=e.target.files[0];e.target.value='';if(!f)return;
   try{
     toast('Restauration…',0);
-    const o=JSON.parse(await f.text());
-    await kvSet('salt',new Uint8Array(o.salt));
-    await kvSet('check',await unb64(o.check));
-    await kvSet('meta',await unb64(o.meta));
-    for(const p of o.photos){
-      await put('photos',{id:p.id,type:p.type,d:await unb64(p.d)});
-      await put('thumbs',{id:p.id,d:await unb64(p.t)});
+    if(D.decode(await f.slice(0,4).arrayBuffer())==='CFR2'){
+      const hl=new DataView(await f.slice(4,8).arrayBuffer()).getUint32(0);
+      const h=JSON.parse(D.decode(await f.slice(8,8+hl).arrayBuffer()));
+      await kvSet('salt',new Uint8Array(h.salt));
+      await kvSet('check',await unb64(h.check));
+      await kvSet('meta',await unb64(h.meta));
+      let off=8+hl;
+      for(const it of h.items){
+        const pd=await f.slice(off,off+it.pl).arrayBuffer();off+=it.pl;
+        const td=await f.slice(off,off+it.tl).arrayBuffer();off+=it.tl;
+        await put('photos',{id:it.id,type:it.type,d:pd});
+        await put('thumbs',{id:it.id,d:td});
+      }
+    }else{
+      const o=JSON.parse(await f.text());
+      await kvSet('salt',new Uint8Array(o.salt));
+      await kvSet('check',await unb64(o.check));
+      await kvSet('meta',await unb64(o.meta));
+      for(const p of o.photos){
+        await put('photos',{id:p.id,type:p.type,d:await unb64(p.d)});
+        await put('thumbs',{id:p.id,d:await unb64(p.t)});
+      }
     }
     toast('Sauvegarde restaurée. Entre ton code d’origine.',4000);
     boot();
